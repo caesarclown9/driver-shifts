@@ -8,6 +8,7 @@ from zoneinfo import ZoneInfo
 
 from fastapi import FastAPI, Response, status
 from fastapi.responses import JSONResponse
+from fastapi.staticfiles import StaticFiles
 
 from .money import format_money
 from .schemas import SeedFile, TripIn, trip_out
@@ -25,6 +26,7 @@ class Settings:
     seed_path: Path | None
     timezone: ZoneInfo
     currency: str
+    static_dir: Path | None = None
 
     @classmethod
     def from_env(cls) -> "Settings":
@@ -34,6 +36,7 @@ class Settings:
             seed_path=Path(seed) if seed else None,
             timezone=ZoneInfo(os.environ.get("DS_TIMEZONE", "Asia/Bishkek")),
             currency=os.environ.get("DS_CURRENCY", "KGS"),
+            static_dir=Path(os.environ["DS_STATIC_DIR"]) if os.environ.get("DS_STATIC_DIR") else None,
         )
 
 
@@ -110,5 +113,12 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         if not created:
             response.status_code = status.HTTP_200_OK
         return {"created": created, "trip": trip_out(stored, tz)}
+
+    # Production image: the built client is served by the API itself, one origin, no CORS.
+    # Mounted last so /api routes win.
+    if settings.static_dir:
+        if not (settings.static_dir / "index.html").exists():
+            raise RuntimeError(f"DS_STATIC_DIR={settings.static_dir} has no index.html — build the client first")
+        app.mount("/", StaticFiles(directory=settings.static_dir, html=True), name="web")
 
     return app
